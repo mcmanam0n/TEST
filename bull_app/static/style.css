@@ -1,0 +1,68 @@
+:root {
+  --bg: #f7f8fb;
+  --card: #fff;
+  --line: #ddd;
+  --text: #1e2330;
+}
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+.container {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 16px;
+}
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px;
+  margin-bottom: 14px;
+}
+label {
+  display: block;
+  margin-bottom: 10px;
+}
+input, select, textarea, button {
+  width: 100%;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid #cfd5e0;
+  box-sizing: border-box;
+}
+.check { display: flex; align-items: center; gap: 8px; }
+.check input { width: auto; }
+button {
+  background: #3559ff;
+  color: white;
+  font-weight: 600;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.table-wrap {
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+th, td {
+  border: 1px solid var(--line);
+  padding: 6px;
+  white-space: nowrap;
+}
+thead th {
+  position: sticky;
+  top: 0;
+  background: #eef2ff;
+  z-index: 1;
+}

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Screener Results</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  <main class="container">
+    <h1>Screener Results</h1>
+    <div class="actions">
+      <a href="{{ url_for('index') }}">← Back</a>
+      <a href="{{ url_for('download_results') }}">Download results.csv</a>
+      <a href="{{ url_for('download_skipped') }}">Download skipped.csv</a>
+    </div>
+
+    <section class="card">
+      <h2>Ranked Results</h2>
+      {% if results %}
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              {% for col in columns %}
+              <th>{{ col }}</th>
+              {% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in results %}
+            <tr>
+              {% for col in columns %}
+              <td>{{ row[col] }}</td>
+              {% endfor %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p>No results yet.</p>
+      {% endif %}
+    </section>
+
+    <section class="card">
+      <h2>Skipped Tickers</h2>
+      {% if skipped %}
+      <ul>
+        {% for item in skipped %}
+        <li><strong>{{ item.ticker }}</strong>: {{ item.reason }}</li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p>No skipped tickers.</p>
+      {% endif %}
+    </section>
+  </main>
+</body>
+</html>

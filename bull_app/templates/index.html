@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bull Evidence Screener</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  <main class="container">
+    <h1>Bull Evidence Score Screener</h1>
+    <form action="{{ url_for('run') }}" method="post" class="card">
+      <label>Universe
+        <select name="universe">
+          <option value="custom">Custom</option>
+          <option value="nasdaq100">Nasdaq-100</option>
+        </select>
+      </label>
+
+      <label>Custom tickers (comma-separated)
+        <textarea name="tickers" rows="4" placeholder="AAPL,MSFT,NVDA"></textarea>
+      </label>
+
+      <label>Start date
+        <input type="date" name="start_date" value="{{ default_start }}" />
+      </label>
+
+      <label>Top N
+        <input type="number" name="top_n" value="25" min="1" max="200" />
+      </label>
+
+      <label class="check">
+        <input type="checkbox" name="macro_enabled" checked /> Use macro gates
+      </label>
+
+      <button type="submit">Run Screener</button>
+    </form>
+  </main>
+</body>
+</html>
