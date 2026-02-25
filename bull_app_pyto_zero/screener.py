@@ -3,6 +3,7 @@ import io
 import os
 import time
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 
 from indicators import (
@@ -20,6 +21,9 @@ from universe import load_universe
 
 
 CACHE_TTL = 24 * 60 * 60
+NETWORK_TIMEOUT_S = 6
+MAX_WORKERS = 8
+MIN_ROWS = 220
 
 
 def default_start_date():
@@ -27,7 +31,7 @@ def default_start_date():
 
 
 def to_stooq_symbol(ticker: str) -> str:
-    return ticker.strip().lower().replace(".", "-").replace("-", "-") + ".us"
+    return ticker.strip().lower().replace(".", "-") + ".us"
 
 
 def _cache_path(ticker, start):
@@ -37,7 +41,7 @@ def _cache_path(ticker, start):
 
 def _fetch_stooq_csv(symbol):
     url = f"https://stooq.com/q/d/l/?s={symbol}&i=d"
-    with urllib.request.urlopen(url, timeout=20) as resp:
+    with urllib.request.urlopen(url, timeout=NETWORK_TIMEOUT_S) as resp:
         return resp.read().decode("utf-8", errors="replace")
 
 
@@ -88,7 +92,7 @@ def _compute_metrics(rows, spy_rows=None):
     atr_pct = [None if atr14[i] is None else atr14[i] / closes[i] for i in range(len(closes))]
 
     rs_ok = False
-    if spy_rows and len(spy_rows) >= len(rows):
+    if spy_rows:
         spy_map = {r["date"]: r["close"] for r in spy_rows}
         rs_series = []
         for r in rows:
@@ -98,14 +102,17 @@ def _compute_metrics(rows, spy_rows=None):
         if len(rs_series) >= 60:
             rs_ok = rs_up(rs_series)
 
-    hist_rising = len(hist) >= 6 and all(hist[-i] is not None and hist[-i - 1] is not None and hist[-i] > hist[-i - 1] for i in range(1, 6))
+    hist_rising = len(hist) >= 6 and all(
+        hist[-i] is not None and hist[-i - 1] is not None and hist[-i] > hist[-i - 1]
+        for i in range(1, 6)
+    )
 
     flags = {
         "golden_cross_recent": golden_cross_recent(sma50, sma200, 60),
         "price_above_200": sma200[-1] is not None and closes[-1] > sma200[-1],
         "sma200_up": len(sma200) > 20 and sma200[-1] is not None and sma200[-21] is not None and sma200[-1] > sma200[-21],
         "rsi_regime": rsi14[-1] is not None and rsi14[-1] > 50 and rsi_avg10[-1] is not None and len(rsi_avg10) > 6 and rsi_avg10[-1] > rsi_avg10[-6],
-        "macd_bullish": macd_line[-1] is not None and macd_line[-1] > signal[-1] and hist_rising,
+        "macd_bullish": macd_line[-1] is not None and signal[-1] is not None and macd_line[-1] > signal[-1] and hist_rising,
         "atr_contraction_breakout": atr_contraction_breakout(atr_pct, closes, highs),
         "rs_up": rs_ok,
         "close_60d_high": len(closes) > 60 and closes[-1] >= max(closes[-60:]),
@@ -127,6 +134,44 @@ def _compute_metrics(rows, spy_rows=None):
     }
 
 
+def _screen_one(ticker, start_date, spy_rows, spy_failed, strict_mode):
+    rows = get_price_rows(ticker, start_date)
+    if len(rows) < MIN_ROWS:
+        return None, {"ticker": ticker, "reason": "too few rows"}
+
+    metrics = _compute_metrics(rows, spy_rows)
+    flags = metrics["flags"]
+    score = score_row(flags)
+    reasons = build_reasons(flags)
+
+    if spy_failed:
+        reasons = (reasons + "; rs limited: SPY unavailable").strip("; ")
+    if strict_mode and not strict_pass(flags):
+        return None, None
+
+    result = {
+        "ticker": ticker,
+        "score": score,
+        "price": f"{metrics['price']:.2f}",
+        "sma50": f"{metrics['sma50']:.2f}" if metrics["sma50"] is not None else "",
+        "sma200": f"{metrics['sma200']:.2f}" if metrics["sma200"] is not None else "",
+        "golden_cross_recent": str(flags["golden_cross_recent"]),
+        "price_above_200": str(flags["price_above_200"]),
+        "sma200_up": str(flags["sma200_up"]),
+        "rsi14": f"{metrics['rsi14']:.2f}" if metrics["rsi14"] is not None else "",
+        "rsi_regime": str(flags["rsi_regime"]),
+        "macd": f"{metrics['macd']:.4f}" if metrics["macd"] is not None else "",
+        "macd_signal": f"{metrics['macd_signal']:.4f}" if metrics["macd_signal"] is not None else "",
+        "macd_hist": f"{metrics['macd_hist']:.4f}" if metrics["macd_hist"] is not None else "",
+        "macd_bullish": str(flags["macd_bullish"]),
+        "atr_pct": f"{metrics['atr_pct']:.4f}" if metrics["atr_pct"] is not None else "",
+        "atr_contraction_breakout": str(flags["atr_contraction_breakout"]),
+        "rs_up": str(flags["rs_up"]),
+        "reasons": reasons,
+    }
+    return result, None
+
+
 def run_screener(start_date=None, top_n=25, strict_mode=False, include_macro=False):
     start_date = start_date or default_start_date()
     tickers = load_universe()
@@ -137,54 +182,36 @@ def run_screener(start_date=None, top_n=25, strict_mode=False, include_macro=Fal
     spy_failed = False
     try:
         spy_rows = get_price_rows("SPY", start_date)
-        if len(spy_rows) < 220:
+        if len(spy_rows) < MIN_ROWS:
             spy_failed = True
             spy_rows = None
     except Exception as e:
         spy_failed = True
         skipped.append({"ticker": "SPY", "reason": f"spy fetch failed: {e}"})
 
-    for t in tickers:
-        try:
-            rows = get_price_rows(t, start_date)
-            if len(rows) < 220:
-                skipped.append({"ticker": t, "reason": "too few rows"})
-                continue
-            metrics = _compute_metrics(rows, spy_rows)
-            flags = metrics["flags"]
-            score = score_row(flags)
-            reasons = build_reasons(flags)
-            if spy_failed:
-                reasons = (reasons + "; rs limited: SPY unavailable").strip("; ")
-            if strict_mode and not strict_pass(flags):
-                continue
-            results.append(
-                {
-                    "ticker": t,
-                    "score": score,
-                    "price": f"{metrics['price']:.2f}",
-                    "sma50": f"{metrics['sma50']:.2f}" if metrics["sma50"] is not None else "",
-                    "sma200": f"{metrics['sma200']:.2f}" if metrics["sma200"] is not None else "",
-                    "golden_cross_recent": str(flags["golden_cross_recent"]),
-                    "price_above_200": str(flags["price_above_200"]),
-                    "sma200_up": str(flags["sma200_up"]),
-                    "rsi14": f"{metrics['rsi14']:.2f}" if metrics["rsi14"] is not None else "",
-                    "rsi_regime": str(flags["rsi_regime"]),
-                    "macd": f"{metrics['macd']:.4f}" if metrics["macd"] is not None else "",
-                    "macd_signal": f"{metrics['macd_signal']:.4f}" if metrics["macd_signal"] is not None else "",
-                    "macd_hist": f"{metrics['macd_hist']:.4f}" if metrics["macd_hist"] is not None else "",
-                    "macd_bullish": str(flags["macd_bullish"]),
-                    "atr_pct": f"{metrics['atr_pct']:.4f}" if metrics["atr_pct"] is not None else "",
-                    "atr_contraction_breakout": str(flags["atr_contraction_breakout"]),
-                    "rs_up": str(flags["rs_up"]),
-                    "reasons": reasons,
-                }
-            )
-        except Exception as e:
-            skipped.append({"ticker": t, "reason": str(e)[:140]})
+    workers = min(MAX_WORKERS, max(1, len(tickers)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {
+            pool.submit(_screen_one, t, start_date, spy_rows, spy_failed, strict_mode): t
+            for t in tickers
+        }
+        for fut in as_completed(futures):
+            ticker = futures[fut]
+            try:
+                result, skip = fut.result()
+                if result:
+                    results.append(result)
+                if skip:
+                    skipped.append(skip)
+            except Exception as e:
+                skipped.append({"ticker": ticker, "reason": str(e)[:140]})
 
     results.sort(key=lambda x: int(x["score"]), reverse=True)
-    results = results[: max(1, int(top_n))]
+    try:
+        top_n_int = max(1, int(top_n))
+    except Exception:
+        top_n_int = 25
+    results = results[:top_n_int]
 
     result_fields = [
         "ticker", "score", "price", "sma50", "sma200", "golden_cross_recent", "price_above_200", "sma200_up",

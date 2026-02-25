@@ -1,6 +1,6 @@
 import html
 import os
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs
 
 from screener import default_start_date, run_screener
@@ -49,17 +49,24 @@ class ScreenerHandler(BaseHTTPRequestHandler):
         if self.path != "/run":
             self._send_html("<h1>404</h1>", 404)
             return
-        length = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(length).decode("utf-8")
-        form = parse_qs(body)
-        start_date = form.get("start_date", [default_start_date()])[0]
-        top_n = int(form.get("top_n", ["25"])[0] or "25")
-        strict_mode = form.get("strict_mode", ["off"])[0] == "on"
-        include_macro = form.get("include_macro", ["off"])[0] == "on"
-        run_screener(start_date=start_date, top_n=top_n, strict_mode=strict_mode, include_macro=include_macro)
-        self.send_response(303)
-        self.send_header("Location", "/results")
-        self.end_headers()
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length).decode("utf-8")
+            form = parse_qs(body)
+            start_date = form.get("start_date", [default_start_date()])[0]
+            top_n_raw = form.get("top_n", ["25"])[0]
+            try:
+                top_n = max(1, min(100, int(top_n_raw)))
+            except Exception:
+                top_n = 25
+            strict_mode = form.get("strict_mode", ["off"])[0] == "on"
+            include_macro = form.get("include_macro", ["off"])[0] == "on"
+            run_screener(start_date=start_date, top_n=top_n, strict_mode=strict_mode, include_macro=include_macro)
+            self.send_response(303)
+            self.send_header("Location", "/results")
+            self.end_headers()
+        except Exception as e:
+            self._send_html(layout("Error", f"<h1>Run failed</h1><p>{html.escape(str(e))}</p><p><a class='btn' href='/'>Back</a></p>"), 500)
 
 
 def layout(title, content):
@@ -108,6 +115,6 @@ def results_page():
 
 
 def run_server(port=8000):
-    server = HTTPServer(("127.0.0.1", port), ScreenerHandler)
+    server = ThreadingHTTPServer(("127.0.0.1", port), ScreenerHandler)
     print(f"Serving on http://127.0.0.1:{port}")
     server.serve_forever()
