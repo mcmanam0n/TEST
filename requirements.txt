@@ -1,0 +1,9 @@
+pandas
+numpy
+scikit-learn
+pyarrow
+requests
+tqdm
+python-dateutil
+joblib
+pytest

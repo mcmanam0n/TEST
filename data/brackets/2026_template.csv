@@ -1,0 +1,4 @@
+slot_id,round,region,teamA,teamB,next_slot_win,next_slot_pos,neutral
+S1,1,EAST,Duke,Kansas,S3,A,1
+S2,1,EAST,UConn,Houston,S3,B,1
+S3,2,EAST,WINNER,WINNER,,A,1
